@@ -1,0 +1,50 @@
+PATH
+  remote: .
+  specs:
+    rbai (0.2.0)
+      httparty (~> 0.23.1)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    bigdecimal (3.2.3)
+    csv (3.3.5)
+    date (3.4.1)
+    erb (5.0.2)
+    httparty (0.23.1)
+      csv
+      mini_mime (>= 1.0.0)
+      multi_xml (>= 0.5.2)
+    io-console (0.8.1)
+    irb (1.15.2)
+      pp (>= 0.6.0)
+      rdoc (>= 4.0.0)
+      reline (>= 0.4.2)
+    mini_mime (1.1.5)
+    multi_xml (0.7.2)
+      bigdecimal (~> 3.1)
+    pp (0.6.2)
+      prettyprint
+    prettyprint (0.2.0)
+    psych (5.2.6)
+      date
+      stringio
+    rake (13.3.0)
+    rdoc (6.14.2)
+      erb
+      psych (>= 4.0.0)
+    reline (0.6.2)
+      io-console (~> 0.5)
+    stringio (3.1.7)
+
+PLATFORMS
+  arm64-darwin-24
+  ruby
+
+DEPENDENCIES
+  irb
+  rake (~> 13.0)
+  rbai!
+
+BUNDLED WITH
+   2.7.1

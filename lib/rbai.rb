@@ -5,7 +5,6 @@ require_relative "rbai/client.rb"
 
 module Rbai
   class Error < StandardError; end
-  # Your code goes here...
 
   ::GenaiClient = Client
 
