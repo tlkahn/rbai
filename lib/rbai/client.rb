@@ -83,28 +83,38 @@ module Rbai
     end
 
     def google_request(prompt, system_instruction, generation_config, model_id, stream: false, &on_chunk)
+      prompt = normalize_text(prompt)
       body = { contents: [ { parts: [ { text: prompt } ] } ] }
       body[:systemInstruction] = { parts: [ { text: system_instruction } ] } if system_instruction
       body[:generationConfig]  = generation_config if generation_config
 
-      url = "#{@base_uri}/#{model_id}:generateContent"
-      opts = http_options(query: { key: @api_key }, body: body.to_json)
       if stream
+        # Use the streaming method and ask for SSE
+        url  = "#{@base_uri}/#{model_id}:streamGenerateContent"
+        opts = http_options(
+          query:   { key: @api_key, alt: "sse" }, # alt=sse is required for REST SSE
+          headers: { "Accept" => "text/event-stream" },
+          body:    body.to_json
+        )
         stream_post(url, opts) do |payload|
-          json = JSON.parse(payload) rescue nil
-          parts = json&.dig("candidates",0,"content","parts")
+          json  = JSON.parse(payload) rescue nil
+          parts = json&.dig("candidates", 0, "content", "parts")
           text  = Array(parts).map { |p| p["text"].to_s }.join
-          on_chunk.call(text) unless text.empty?
+          on_chunk.call(text.to_s.unicode_normalize(:nfc)) unless text.empty?
         end
         return nil
       else
+        url  = "#{@base_uri}/#{model_id}:generateContent"
+        opts = http_options(query: { key: @api_key }, body: body.to_json)
         resp = HTTParty.post(url, opts)
         handle_response(resp)
         resp.parsed_response
       end
     end
 
+
     def openai_request(prompt, system_instruction, generation_config, model_id, stream: false, &on_chunk)
+      prompt = normalize_text(prompt)
       messages = []
       messages << { role: "system", content: system_instruction } if system_instruction
       messages << { role: "user",   content: prompt }
@@ -113,6 +123,11 @@ module Rbai
       body.merge!(generation_config) if generation_config
       body[:stream] = true if stream
 
+      body[:max_tokens] = (generation_config && generation_config[:max_tokens]) || 1200
+      if generation_config && generation_config[:response_format]
+        body[:response_format] = generation_config[:response_format] # e.g., {type: "json_object"}
+      end
+
       headers = {
         "Content-Type"    => "application/json",
         "Authorization"   => "Bearer #{@api_key}",
@@ -120,7 +135,10 @@ module Rbai
       }
 
       url  = "#{@base_uri}/chat/completions"
-      opts = http_options(headers: headers, body: body.to_json)
+      opts = http_options(
+        headers: stream ? headers.merge("Accept" => "text/event-stream") : headers,
+        body: body.to_json
+      )
 
       if stream
         stream_post(url, opts) do |payload|
@@ -138,6 +156,7 @@ module Rbai
     end
 
     def claude_request(prompt, system_instruction, generation_config, model_id, stream: false, &on_chunk)
+      prompt = normalize_text(prompt)
       body = { model: model_id, messages: [ { role: "user", content: prompt } ], max_tokens: 1000 }
       body[:system] = system_instruction if system_instruction
       body.merge!(generation_config) if generation_config
@@ -150,14 +169,16 @@ module Rbai
       }
 
       url  = "#{@base_uri}/messages"
-      opts = http_options(headers: headers, body: body.to_json)
+      opts = http_options(
+        headers: stream ? headers.merge("Accept" => "text/event-stream") : headers,
+        body:    body.to_json
+      )
 
       if stream
         stream_post(url, opts) do |payload|
           json = JSON.parse(payload) rescue nil
-          # event types: message_start, content_block_start, content_block_delta, ...
           if json && json["type"] == "content_block_delta" && json.dig("delta","type") == "text_delta"
-            on_chunk.call(json.dig("delta","text"))
+            on_chunk.call(json.dig("delta","text").to_s.unicode_normalize(:nfc))
           end
         end
         return nil
@@ -190,6 +211,32 @@ module Rbai
           end
         end
       end
+    end
+
+    def normalize_text(s)
+      s = s.unicode_normalize(:nfc)
+      s.gsub(/\s+/, " ").strip
+    end
+
+    def http_options(extra = {})
+      default_headers = {
+        "Content-Type"    => "application/json",
+        "Accept"          => "application/json",
+        "Accept-Encoding" => "gzip"            # advertise gzip; HTTParty auto-decompresses
+        # "Connection"    => "keep-alive"     # optional; Net::HTTP keeps alive by default
+      }
+
+      # deep-merge headers so callers don't overwrite defaults
+      merged_headers = default_headers.merge(extra.fetch(:headers, {}))
+      opts = { headers: merged_headers }
+
+      opts[:timeout]      = @timeout      if @timeout
+      opts[:open_timeout] = @open_timeout if @open_timeout
+      opts[:read_timeout] = @read_timeout if @read_timeout
+
+      # merge everything except headers (already merged)
+      opts.merge!(extra.reject { |k, _| k == :headers })
+      opts
     end
 
     def extract_text(response)

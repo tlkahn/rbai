@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    rbai (0.2.2)
+    rbai (0.2.4)
       httparty (~> 0.23.1)
 
 GEM
