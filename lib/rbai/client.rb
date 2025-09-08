@@ -6,7 +6,8 @@ module Rbai
   class Client
     DEFAULT_TIMEOUT = 300           # seconds, long enough for big inputs
     DEFAULT_RETRIES = 3
-    DEFAULT_BACKOFF_BASE = 0.8
+    DEFAULT_BACKOFF_BASE = 1.8
+    MAX_BACKOFF_SECONDS  = 20
 
     PROVIDERS = {
       google: {
@@ -61,10 +62,14 @@ module Rbai
       attempt = 0
       begin
         attempt += 1
-        yield
+        return yield
       rescue => e
         raise if attempt > @retries
-        sleep ((DEFAULT_BACKOFF_BASE ** attempt) + rand * 0.1) # jitter
+        # Optional: only retry on transient classes
+        transient = e.is_a?(Net::ReadTimeout) || e.is_a?(Net::OpenTimeout) || e.is_a?(Errno::ECONNRESET)
+        raise unless transient
+        sleep_time = [ (DEFAULT_BACKOFF_BASE ** attempt) + rand * 0.25, MAX_BACKOFF_SECONDS ].min
+        sleep sleep_time
         retry
       end
     end
@@ -84,14 +89,19 @@ module Rbai
 
       url = "#{@base_uri}/#{model_id}:generateContent"
       opts = http_options(query: { key: @api_key }, body: body.to_json)
-      resp = if stream
-        # HTTParty supports streaming via :stream_body and a block that receives fragments.
-        HTTParty.post(url, opts.merge(stream_body: true)) { |frag| on_chunk.call(frag) }
+      if stream
+        stream_post(url, opts) do |payload|
+          json = JSON.parse(payload) rescue nil
+          parts = json&.dig("candidates",0,"content","parts")
+          text  = Array(parts).map { |p| p["text"].to_s }.join
+          on_chunk.call(text) unless text.empty?
+        end
+        return nil
       else
-        HTTParty.post(url, opts)
+        resp = HTTParty.post(url, opts)
+        handle_response(resp)
+        resp.parsed_response
       end
-      handle_response(resp)
-      resp.parsed_response
     end
 
     def openai_request(prompt, system_instruction, generation_config, model_id, stream: false, &on_chunk)
@@ -104,9 +114,8 @@ module Rbai
       body[:stream] = true if stream
 
       headers = {
-        "Content-Type"  => "application/json",
-        "Authorization" => "Bearer #{@api_key}",
-        # Prevent duplicate charges if we retry:
+        "Content-Type"    => "application/json",
+        "Authorization"   => "Bearer #{@api_key}",
         "Idempotency-Key" => SecureRandom.uuid
       }
 
@@ -114,7 +123,12 @@ module Rbai
       opts = http_options(headers: headers, body: body.to_json)
 
       if stream
-        HTTParty.post(url, opts.merge(stream_body: true)) { |frag| on_chunk.call(frag) }
+        stream_post(url, opts) do |payload|
+          next if payload == "[DONE]"
+          json  = JSON.parse(payload) rescue nil
+          delta = json&.dig("choices", 0, "delta", "content")
+          on_chunk.call(delta.to_s.unicode_normalize(:nfc)) if delta && !delta.empty?
+        end
         return nil
       else
         resp = HTTParty.post(url, opts)
@@ -139,7 +153,13 @@ module Rbai
       opts = http_options(headers: headers, body: body.to_json)
 
       if stream
-        HTTParty.post(url, opts.merge(stream_body: true)) { |frag| on_chunk.call(frag) }
+        stream_post(url, opts) do |payload|
+          json = JSON.parse(payload) rescue nil
+          # event types: message_start, content_block_start, content_block_delta, ...
+          if json && json["type"] == "content_block_delta" && json.dig("delta","type") == "text_delta"
+            on_chunk.call(json.dig("delta","text"))
+          end
+        end
         return nil
       else
         resp = HTTParty.post(url, opts)
@@ -150,9 +170,25 @@ module Rbai
 
     def handle_response(resp)
       unless resp && resp.respond_to?(:success?) && resp.success?
-        code = resp&.code
-        body = resp&.body
-        raise "Request failed: #{code} #{body}"
+        code = resp&.code.to_i
+        if code == 429
+          retry_after = resp.headers["retry-after"]&.to_i
+          sleep(retry_after) if retry_after && retry_after > 0
+        end
+        raise "Request failed: #{code} #{resp&.body}"
+      end
+    end
+
+    def stream_post(url, opts)
+      buffer = +""
+      HTTParty.post(url, opts.merge(stream_body: true)) do |frag|
+        buffer << frag
+        while (cut = buffer.index("\n\n")) # SSE frames end with a blank line
+          frame = buffer.slice!(0..cut+1)
+          frame.lines.grep(/^data:/).each do |line|
+            yield line.sub(/^data:\s*/, "")
+          end
+        end
       end
     end
 
