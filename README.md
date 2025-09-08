@@ -21,8 +21,14 @@ It abstracts over different REST APIs and response formats, making it easier to 
 Add this line to your application's Gemfile:
 
 ```ruby
-gem "rbai", github: "your-username/rbai"
+gem "rbai", github: "tlkahn/rbai"
 ````
+
+or:
+
+```ruby
+gem "rbai", git: "https://github.com/tlkahn/rbai"
+```
 
 And then execute:
 
