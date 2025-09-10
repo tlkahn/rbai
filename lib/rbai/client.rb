@@ -74,14 +74,6 @@ module Rbai
       end
     end
 
-    def http_options(extra = {})
-      opts = { headers: { "Content-Type" => "application/json" } }
-      opts[:timeout]       = @timeout if @timeout
-      opts[:open_timeout]  = @open_timeout if @open_timeout
-      opts[:read_timeout]  = @read_timeout if @read_timeout
-      opts.merge!(extra)
-    end
-
     def google_request(prompt, system_instruction, generation_config, model_id, stream: false, &on_chunk)
       prompt = normalize_text(prompt)
       body = { contents: [ { parts: [ { text: prompt } ] } ] }
