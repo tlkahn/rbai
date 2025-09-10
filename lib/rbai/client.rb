@@ -24,6 +24,13 @@ module Rbai
       }
     }.freeze
 
+    MODEL_LIMITS = {
+      /gpt-4\.1/  => { context: 1_047_576, max_out: 32_768 }, # includes -2025-04-14
+      /o4-mini/   => { context: 200_000,   max_out: 100_000 },
+      /o3/        => { context: 200_000,   max_out: 100_000 },
+      /gpt-4o/    => { context: 128_000,   max_out: 16_384 }
+    }.freeze
+
     def initialize(provider:, api_key: nil, timeout: DEFAULT_TIMEOUT, retries: DEFAULT_RETRIES, stream: false, open_timeout: nil, read_timeout: nil)
       @provider = provider.to_sym
       config = PROVIDERS[@provider] or raise ArgumentError, "Unsupported provider: #{provider}"
@@ -115,7 +122,7 @@ module Rbai
       body.merge!(generation_config) if generation_config
       body[:stream] = true if stream
 
-      body[:max_tokens] = (generation_config && generation_config[:max_tokens]) || 1200
+      body[:max_tokens] = (generation_config && generation_config[:max_tokens]) ||  1_047_576
       if generation_config && generation_config[:response_format]
         body[:response_format] = generation_config[:response_format] # e.g., {type: "json_object"}
       end
@@ -233,15 +240,15 @@ module Rbai
 
     def extract_text(response)
       case @provider
-      when :google
-        cand  = Array(response["candidates"]).first
-        parts = cand&.dig("content", "parts")
-        Array(parts).map { |p| p["text"].to_s }.join
-      when :openai
-        choice = Array(response["choices"]).first
-        choice&.dig("message", "content").to_s
-      when :claude
-        Array(response["content"]).map { |c| c["text"].to_s }.join
+        when :google
+          cand  = Array(response["candidates"]).first
+          parts = cand&.dig("content", "parts")
+          Array(parts).map { |p| p["text"].to_s }.join
+        when :openai
+          choice = Array(response["choices"]).first
+          choice&.dig("message", "content").to_s
+        when :claude
+          Array(response["content"]).map { |c| c["text"].to_s }.join
       end
     end
   end
