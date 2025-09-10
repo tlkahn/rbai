@@ -122,7 +122,7 @@ module Rbai
       body.merge!(generation_config) if generation_config
       body[:stream] = true if stream
 
-      body[:max_tokens] = (generation_config && generation_config[:max_tokens]) ||  1_047_576
+      body[:max_tokens] = (generation_config && generation_config[:max_tokens]) ||  32_768
       if generation_config && generation_config[:response_format]
         body[:response_format] = generation_config[:response_format] # e.g., {type: "json_object"}
       end
